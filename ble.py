@@ -3,6 +3,12 @@
 
 import struct
 import sys
+import os
+import argparse
+import time
+
+from binascii import hexlify
+from struct import pack, unpack
 from Foundation import *
 from PyObjCTools import AppHelper
 
@@ -21,7 +27,6 @@ class BleClass(object):
             manager.connectPeripheral_options_(peripheral, None)
             manager.stopScan()
 
-
     def centralManager_didConnectPeripheral_(self, manager, peripheral):
         print repr(peripheral.UUID())
         peripheral.setDelegate_(self)
@@ -29,72 +34,115 @@ class BleClass(object):
         
     def peripheral_didDiscoverServices_(self, peripheral, services):
         print self.peripheral.services()
-        self.service = self.peripheral.services()[1]
+        self.service = self.peripheral.services()[0]
         self.peripheral.discoverCharacteristics_forService_([], self.service)
 
     def peripheral_didDiscoverCharacteristicsForService_error_(self, peripheral, service, error):
-      peripheral.readValueForCharacteristic_(self.service.characteristics()[4])
+      write = self.service.characteristics()[1]
+    
       for characteristic in self.service.characteristics():
-        peripheral.setNotifyValue_(true, characteristic)
+        print characteristic
+        if characteristic.UUID() == write.UUID():
+            self.characteristic = characteristic
+            self.UpdateFirmware(args.file)
+
+    def peripheral_didReceiveReadRequest_error_(self, peripheral, characteristic, error):
+      print 'siema'
 
     def peripheral_didWriteValueForCharacteristic_error_(self, peripheral, characteristic, error):
-        print 'In error handler'
         print 'ERROR:' + repr(error)
+        if self.characteristic.UUID() == characteristic.UUID():
+            print("Good")
 
     def peripheral_didUpdateNotificationStateForCharacteristic_error_(self, peripheral, characteristic, error):
         print "Notification handler"
     
     def peripheral_didUpdateValueForCharacteristic_error_(self, peripheral, characteristic, error):
-      print characteristic.properties
-      print characteristic.value().bytes().tobytes()
-        # print repr(characteristic.value().bytes().tobytes())
-      value = characteristic.value()
+        print "Updated"
 
-      for test in value:
-        print struct.unpack('<B', test)[0]
-          
-      temp = decode_value(value[1:3])
-      print 'data:' + str(temp)
+    def sendMessage(self, packet):
+        byte = NSData.dataWithBytes_length_(packet, len(packet))
+        self.peripheral.writeValue_forCharacteristic_type_(byte, self.characteristic, 0)
 
-      humid = decode_value(value[3:5],0.01)
-      print 'humidity:' + str(humid)
+    def createPacket(self, address, cmd, arg, payload):
+        packet = pack("<BBBB", len(payload)+2, address, cmd, arg) + payload
+        return "\x55\xAA" + packet + pack("<H", self.checksum(packet))
 
-      lum = decode_value(value[5:7])
-      print 'lumix:' + str(lum)
+    def checksum(self, data, s = 0):
+        s = 0
+        for c in data:
+            s += ord(c)
+        return (s & 0xFFFF) ^ 0xFFFF
+    
+    def UpdateFirmware(self, fwfile):
+        fwfile.seek(0, os.SEEK_END)
+        fw_size = fwfile.tell()
+        fwfile.seek(0)
+        fw_page_size = 0x80
 
-      uvi = decode_value(value[9:7], 0.01)
-      print 'UV index:' + str(uvi)
+        # print('Ready')
 
-      atom = decode_value(value[9:11], 0.1)
-      print 'Atom:' + str(atom)
+        # print('Locking...')
+        # packet = self.createPacket(0x20, 0x03, 0x70, pack("<H", 0x0001))
+        # print '>', hexlify(packet).upper()
+        # self.sendMessage(packet)
+        # time.sleep(1)
+        
+        # print('Starting...')
+        # packet = self.createPacket(0x20, 0x07, 0x00, pack("<L", fw_size))
+        # print '>', hexlify(packet).upper()
+        # self.sendMessage(packet)
+        # time.sleep(1)
 
-      noise = decode_value(value[11:13], 0.01)
-      print 'Noise:' + str(noise)
+        # print('Writing...')
+        # page = 0
+        # chk = 0
+        # while fw_size:
+        #     chunk_sz = min(fw_size, fw_page_size)
+        #     read = fwfile.read(chunk_sz)
+        #     chk = self.checksum(read, chk)
+        #     data = read+b'\x00'*(fw_page_size-chunk_sz)
+        #     packet = self.createPacket(0x20, 0x08, page, data)
+        #     print '>', hexlify(packet).upper()
+        #     self.sendMessage(packet)
+        #     time.sleep(0.3)
+        #     page += 1
+        #     fw_size -= chunk_sz
 
-      disco = decode_value(value[13:15], 0.01)
-      print 'Disco:' + str(disco)
+        # print('Finalizing...')
+        # data = pack("<L", chk ^ 0xFFFFFFFF)
+        # packet = self.createPacket(0x20, 0x09, 0x00, data)
+        # print '>', hexlify(packet).upper()
+        # self.sendMessage(packet)
+        # time.sleep(1)
 
-      heat = decode_value(value[15:17], 0.01)
-      print 'Heat:' + str(heat)
-      
-      batt = decode_value(value[17:19],0.001)
-      print 'Battery:' + str(batt)
+        # print('Reboot')
+        # data = pack("<H", 0x00)
+        # packet = self.createPacket(0x20, 0x0A, 0x00, data)
+        # print '>', hexlify(packet).upper()
+        # self.sendMessage(packet)
 
+        print('Reboot')
+        data = pack("<H", 0x00)
+        packet = self.createPacket(0x20, 0x0A, 0x00, data)
+        print '>', hexlify(packet).upper()
+        self.sendMessage(packet)
 
-# Decoding sensor value from Wx2Beancon Data format.
-def decode_value(value, multi=1.0):
-    if(len(value) != 2):
-        return None
-    lsb,msb = struct.unpack('BB',value)
-    result = ((msb << 8) + lsb) * multi
-    return result
+        print('Done')
+        return True
+
+parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
+	description='Xiaomi m365 firmware flasher',
+	epilog='Example:  %(prog)s firmware.bin - flash firmware.bin to ESC using BLE protocol')
+
+parser.add_argument('file', type=argparse.FileType('rb'), help='firmware file')
+
+args = parser.parse_args()
 
 if "__main__" == __name__:
   try:
-    # DO THINGS
     central_manager = CBCentralManager.alloc()
     central_manager.initWithDelegate_queue_options_(BleClass(), None, None)
     AppHelper.runConsoleEventLoop()
   except KeyboardInterrupt:
-    # quit
     sys.exit()
