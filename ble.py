@@ -12,6 +12,8 @@ from struct import pack, unpack
 from Foundation import *
 from PyObjCTools import AppHelper
 
+buffer = []
+
 class BleClass(object):
 
     def centralManagerDidUpdateState_(self, manager):
@@ -45,17 +47,28 @@ class BleClass(object):
       print 'Read ERR'
 
     def peripheral_didWriteValueForCharacteristic_error_(self, peripheral, characteristic, error):
-        print 'ERROR:' + repr(error)
-        if self.characteristic.UUID() == characteristic.UUID():
-            print("Cool")
+        print("WRITTEN")
+        self.sendMessage1()
 
     def sendMessage(self, packet):
         byte = NSData.dataWithBytes_length_(packet, len(packet))
-        # self.peripheral.writeValue_forCharacteristic_type_(byte, self.characteristic, 0)
+        self.peripheral.writeValue_forCharacteristic_type_(byte, self.characteristic, 1)
+
+    def sendMessage1(self):
+        if buffer:
+            byte = NSData.dataWithBytes_length_(buffer[0], len(buffer[0]))
+            print '>', hexlify(buffer[0]).upper()
+            del buffer[0]
+            self.peripheral.writeValue_forCharacteristic_type_(byte, self.characteristic, 0)
 
     def createPacket(self, address, cmd, arg, payload):
         packet = pack("<BBBB", len(payload)+2, address, cmd, arg) + payload
         return "\x55\xAA" + packet + pack("<H", self.checksum(packet))
+
+    def checksum1(self, s, data):
+        for c in data:
+            s += ord(c)
+        return (s & 0xFFFFFFFF)
 
     def checksum(self, data, s = 0):
         s = 0
@@ -69,49 +82,65 @@ class BleClass(object):
         fwfile.seek(0)
         fw_page_size = 0x80
 
-        print('Ready')
+        # print('Ready')
 
-        print('Locking...')
+        # print('Locking...')
         packet = self.createPacket(0x20, 0x03, 0x70, pack("<H", 0x0001))
-        print '>', hexlify(packet).upper()
+        # buffer.append(packet)
+        # print '>', hexlify(packet).upper()
         self.sendMessage(packet)
         time.sleep(1)
         
-        print('Starting...')
-        packet = self.createPacket(0x20, 0x07, 0x00, pack("<L", fw_size))
-        print '>', hexlify(packet).upper()
+        # print('Starting...')
+        packet = self.createPacket(0x20, 0x07, 0, pack("<L", fw_size))
+        # buffer.append(packet)
+        # print '>', hexlify(packet).upper()
         self.sendMessage(packet)
-        time.sleep(1)
+        time.sleep(10)
 
-        print('Writing...')
+        # print('Writing...')
         page = 0
         chk = 0
         while fw_size:
             chunk_sz = min(fw_size, fw_page_size)
             read = fwfile.read(chunk_sz)
-            chk = self.checksum(read, chk)
+            chk = self.checksum1(chk, read)
             data = read+b'\x00'*(fw_page_size-chunk_sz)
-            packet = self.createPacket(0x20, 0x08, page, data)
-            print '>', hexlify(packet).upper()
-            self.sendMessage(packet)
-            time.sleep(0.3)
+            packet = self.createPacket(0x20, 0x08, page & 0xFF, data) 
+            size = len(packet)
+            ofs = 0
+            while size:
+                chunk_sz1 = min(size, 20)
+                buffer.append(bytearray(packet[ofs:ofs+chunk_sz1]))
+                # print hexlify(bytearray(packet[ofs:ofs+chunk_sz1]))
+                ofs += chunk_sz1
+                size -= chunk_sz1
+            # buffer.append(packet)
+            # print '>', hexlify(packet).upper()
+            # self.sendMessage(packet)
+            # time.sleep(0.1)
             page += 1
             fw_size -= chunk_sz
 
-        print('Finalizing...')
+        # print('Finalizing...')
         data = pack("<L", chk ^ 0xFFFFFFFF)
-        packet = self.createPacket(0x20, 0x09, 0x00, data)
-        print '>', hexlify(packet).upper()
-        self.sendMessage(packet)
-        time.sleep(1)
+        packet = self.createPacket(0x20, 0x09, 0, data)
+        buffer.append(packet)
+        # print '>', hexlify(packet).upper()
+        # self.sendMessage(packet)
+        # time.sleep(1)
 
-        print('Reboot')
-        data = pack("<H", 0x00)
-        packet = self.createPacket(0x20, 0x0A, 0x00, data)
+        # print('Reboot')
+        data = pack("<H", 0)
+        # packet = self.createPacket(0x20, 0x0A, 0, data)
+        packet = '\x55\xaa\x02\x20\x0a\x00\xd3\xff'
+        buffer.append(packet)
         print '>', hexlify(packet).upper()
-        self.sendMessage(packet)
+        # self.sendMessage(packet)
 
-        print('Done')
+        self.sendMessage1()
+
+        # print('Done')
         return True
 
 parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
