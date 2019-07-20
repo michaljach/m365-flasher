@@ -4,6 +4,7 @@ Python script to flash your Xiaomi Mijia 365 Scooter Firmware via BLE (Bluetooth
 ### Requirements
 - Pyhton 2.7
 - macOS 10.10+
+- Xcode or Xcode Command Tools
 - BLE compatible device (Bluetooth 5.0)
 
 ### Usage
@@ -21,5 +22,5 @@ positional arguments:
 optional arguments:
   -h, --help  show this help message and exit
 
-Example:  ble.py 68753A44-4D6F-1226-9C60-0050E4C00067 firmware.bin - flash firmware.bin to ESC using BLE protocol
+Example:  ble.py 68753A44-4D6F-1226-9C60-0050E4C00067 firmware.bin
 ```
