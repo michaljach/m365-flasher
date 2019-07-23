@@ -13,6 +13,7 @@ from Foundation import *
 from PyObjCTools import AppHelper
 
 buffer = []
+bufferSize = 0
 
 class BleClass(object):
 
@@ -47,15 +48,16 @@ class BleClass(object):
       print 'Read ERR'
 
     def peripheral_didWriteValueForCharacteristic_error_(self, peripheral, characteristic, error):
-        print("WRITTEN")
-        self.sendMessage1()
-
-    def sendMessage(self, packet):
-        byte = NSData.dataWithBytes_length_(packet, len(packet))
-        self.peripheral.writeValue_forCharacteristic_type_(byte, self.characteristic, 1)
-
-    def sendMessage1(self):
         if buffer:
+            print("WRITTEN")
+            self.sendMessage()
+        else:
+            print("DONE!")
+
+    def sendMessage(self):
+        if buffer:
+            if len(buffer) == bufferSize - 1:
+                sleep(10)
             byte = NSData.dataWithBytes_length_(buffer[0], len(buffer[0]))
             print '>', hexlify(buffer[0]).upper()
             del buffer[0]
@@ -82,23 +84,15 @@ class BleClass(object):
         fwfile.seek(0)
         fw_page_size = 0x80
 
-        # print('Ready')
+        print('Ready')
+        print('Building payload...')
 
-        # print('Locking...')
         packet = self.createPacket(0x20, 0x03, 0x70, pack("<H", 0x0001))
-        # buffer.append(packet)
-        # print '>', hexlify(packet).upper()
-        self.sendMessage(packet)
-        time.sleep(1)
-        
-        # print('Starting...')
-        packet = self.createPacket(0x20, 0x07, 0, pack("<L", fw_size))
-        # buffer.append(packet)
-        # print '>', hexlify(packet).upper()
-        self.sendMessage(packet)
-        time.sleep(10)
+        buffer.append(packet)
 
-        # print('Writing...')
+        packet = self.createPacket(0x20, 0x07, 0, pack("<L", fw_size))
+        buffer.append(packet)
+
         page = 0
         chk = 0
         while fw_size:
@@ -112,35 +106,24 @@ class BleClass(object):
             while size:
                 chunk_sz1 = min(size, 20)
                 buffer.append(bytearray(packet[ofs:ofs+chunk_sz1]))
-                # print hexlify(bytearray(packet[ofs:ofs+chunk_sz1]))
                 ofs += chunk_sz1
                 size -= chunk_sz1
-            # buffer.append(packet)
-            # print '>', hexlify(packet).upper()
-            # self.sendMessage(packet)
-            # time.sleep(0.1)
             page += 1
             fw_size -= chunk_sz
 
-        # print('Finalizing...')
         data = pack("<L", chk ^ 0xFFFFFFFF)
         packet = self.createPacket(0x20, 0x09, 0, data)
         buffer.append(packet)
-        # print '>', hexlify(packet).upper()
-        # self.sendMessage(packet)
-        # time.sleep(1)
 
-        # print('Reboot')
         data = pack("<H", 0)
         # packet = self.createPacket(0x20, 0x0A, 0, data)
         packet = '\x55\xaa\x02\x20\x0a\x00\xd3\xff'
         buffer.append(packet)
-        print '>', hexlify(packet).upper()
-        # self.sendMessage(packet)
 
-        self.sendMessage1()
+        bufferSize = len(buffer)
 
-        # print('Done')
+        self.sendMessage()
+
         return True
 
 parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
